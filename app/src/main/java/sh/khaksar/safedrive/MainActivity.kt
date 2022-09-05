@@ -19,9 +19,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
 import com.google.mlkit.common.MlKitException
-import com.google.mlkit.vision.demo.kotlin.facedetector.FaceDetectorProcessor
+import sh.khaksar.safedrive.facedetector.FaceDetectorProcessor
 import com.google.mlkit.vision.face.FaceDetectorOptions
-import sh.khaksar.safedrive.preference.PreferenceUtils
 
 class MainActivity : AppCompatActivity() {
 
@@ -32,7 +31,6 @@ class MainActivity : AppCompatActivity() {
     private var analysisUseCase: ImageAnalysis? = null
     private var imageProcessor: VisionImageProcessor? = null
     private var needUpdateGraphicOverlayImageSourceInfo = false
-    private var lensFacing = CameraSelector.LENS_FACING_FRONT
     private var cameraSelector: CameraSelector? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,7 +41,8 @@ class MainActivity : AppCompatActivity() {
             getRuntimePermissions()
         }
 
-        cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        cameraSelector =
+            CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_FRONT).build()
 
         setContentView(R.layout.activity_main)
         previewView = findViewById(R.id.preview_view)
@@ -79,7 +78,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-
         imageProcessor?.run { this.stop() }
     }
 
@@ -135,48 +133,43 @@ class MainActivity : AppCompatActivity() {
             .enableTracking()
 
         imageProcessor = FaceDetectorProcessor(this, faceDetectorOptions.build())
-
         val builder = ImageAnalysis.Builder()
-        val targetResolution = PreferenceUtils.getCameraXTargetResolution(this, lensFacing)
-        if (targetResolution != null) {
-            builder.setTargetResolution(targetResolution)
-        }
         analysisUseCase = builder.build()
 
-        needUpdateGraphicOverlayImageSourceInfo = true
+        needUpdateGraphicOverlayImageSourceInfo = true // a flag to adjust graphic overlay only one-time
 
+        //the cameraX method listener method to send stream of data (proxyImage) for whatever analysis we need
         analysisUseCase?.setAnalyzer(
             // imageProcessor.processImageProxy will use another thread to run the detection underneath,
             // thus we can just runs the analyzer itself on main thread.
-            ContextCompat.getMainExecutor(this),
-            ImageAnalysis.Analyzer { imageProxy: ImageProxy ->
-                if (needUpdateGraphicOverlayImageSourceInfo) {
-                    val isImageFlipped = lensFacing == CameraSelector.LENS_FACING_FRONT
-                    val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-                    if (rotationDegrees == 0 || rotationDegrees == 180) {
-                        graphicOverlay!!.setImageSourceInfo(
-                            imageProxy.width,
-                            imageProxy.height,
-                            isImageFlipped
-                        )
-                    } else {
-                        graphicOverlay!!.setImageSourceInfo(
-                            imageProxy.height,
-                            imageProxy.width,
-                            isImageFlipped
-                        )
-                    }
-                    needUpdateGraphicOverlayImageSourceInfo = false
+            ContextCompat.getMainExecutor(this)
+        ) { imageProxy: ImageProxy ->
+            if (needUpdateGraphicOverlayImageSourceInfo) {
+                val isImageFlipped = true //because of CameraSelector.LENS_FACING_FRONT
+                val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                if (rotationDegrees == 0 || rotationDegrees == 180) {
+                    graphicOverlay!!.setImageSourceInfo(
+                        imageProxy.width,
+                        imageProxy.height,
+                        isImageFlipped
+                    )
+                } else {
+                    graphicOverlay!!.setImageSourceInfo(
+                        imageProxy.height,
+                        imageProxy.width,
+                        isImageFlipped
+                    )
                 }
-                try {
-                    imageProcessor!!.processImageProxy(imageProxy, graphicOverlay)
-                } catch (e: MlKitException) {
-                    Log.e(TAG, "Failed to process image. Error: " + e.localizedMessage)
-                    Toast.makeText(applicationContext, e.localizedMessage, Toast.LENGTH_SHORT)
-                        .show()
-                }
+                needUpdateGraphicOverlayImageSourceInfo = false
             }
-        )
+            try {
+                imageProcessor!!.processImageProxy(imageProxy, graphicOverlay)
+            } catch (e: MlKitException) {
+                Log.e(TAG, "Failed to process image. Error: " + e.localizedMessage)
+                Toast.makeText(applicationContext, e.localizedMessage, Toast.LENGTH_SHORT)
+                    .show()
+            }
+        }
         cameraProvider!!.bindToLifecycle(/* lifecycleOwner= */ this,
             cameraSelector!!,
             analysisUseCase

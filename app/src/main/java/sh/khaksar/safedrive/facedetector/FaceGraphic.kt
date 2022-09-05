@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.google.mlkit.vision.demo.kotlin.facedetector
+package sh.khaksar.safedrive.facedetector
 
 import android.graphics.Canvas
 import android.graphics.Color
