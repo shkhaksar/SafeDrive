@@ -26,7 +26,6 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.google.mlkit.vision.face.FaceLandmark
-import sh.khaksar.safedrive.GraphicOverlay
 import sh.khaksar.safedrive.VisionProcessorBase
 import java.util.Locale
 
@@ -57,9 +56,9 @@ class FaceDetectorProcessor(context: Context, detectorOptions: FaceDetectorOptio
         return detector.process(image)
     }
 
-    override fun onSuccess(results: List<Face>, graphicOverlay: GraphicOverlay) {
+    override fun onSuccess(results: List<Face>,context: Context) {
         for (face in results) {
-            Toast.makeText(graphicOverlay.context, face.toString(), Toast.LENGTH_LONG).show()
+            Toast.makeText(context, face.toString(), Toast.LENGTH_LONG).show()
             //TODO: You need to update the text here somehow
             logExtrasForTesting(face)
         }

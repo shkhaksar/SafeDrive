@@ -9,6 +9,7 @@ import android.view.Surface.ROTATION_180
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraSelector.LENS_FACING_FRONT
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -16,60 +17,42 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
 import com.google.mlkit.common.MlKitException
-import sh.khaksar.safedrive.facedetector.FaceDetectorProcessor
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import sh.khaksar.safedrive.facedetector.FaceDetectorProcessor
 
 class MainActivity : AppCompatActivity() {
 
     private var previewView: PreviewView? = null
-    private var graphicOverlay: GraphicOverlay? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var previewUseCase: Preview? = null
     private var analysisUseCase: ImageAnalysis? = null
     private var imageProcessor: VisionImageProcessor? = null
-    private var needUpdateGraphicOverlayImageSourceInfo = false
-    private var cameraSelector: CameraSelector? = null
+    private val camSelector = CameraSelector.Builder().requireLensFacing(LENS_FACING_FRONT).build()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d(TAG, "onCreate")
 
         if (!isRuntimePermissionsGranted()) {
             getRuntimePermissions()
         }
 
-        cameraSelector =
-            CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_FRONT).build()
 
         setContentView(R.layout.activity_main)
+
         previewView = findViewById(R.id.preview_view)
-        if (previewView == null) {
-            Log.d(TAG, "previewView is null")
-        }
-
-        graphicOverlay = findViewById(R.id.graphic_overlay)
-        if (graphicOverlay == null) {
-            Log.d(TAG, "graphicOverlay is null")
-        }
-
 
         ViewModelProvider(
-            this,
-            ViewModelProvider.AndroidViewModelFactory.getInstance(application)
-        )[CameraXViewModel::class.java]
-            .processCameraProvider
-            ?.observe(
-                this,
-                Observer { provider: ProcessCameraProvider? ->
-                    cameraProvider = provider
-                    bindAllCameraUseCases()
-                }
-            )
+            this, ViewModelProvider.AndroidViewModelFactory.getInstance(application)
+        )[CameraXViewModel::class.java].processCameraProvider?.observe(this)
+        { provider: ProcessCameraProvider? ->
+            cameraProvider = provider
+            bindAllCameraUseCases()
+        }
 
     }
+
 
     public override fun onResume() {
         super.onResume()
@@ -78,12 +61,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        imageProcessor?.run { this.stop() }
+        imageProcessor?.stop()
     }
 
     public override fun onDestroy() {
         super.onDestroy()
-        imageProcessor?.run { this.stop() }
+        imageProcessor?.stop()
     }
 
     private fun bindAllCameraUseCases() {
@@ -103,14 +86,9 @@ class MainActivity : AppCompatActivity() {
             cameraProvider!!.unbind(previewUseCase)
         }
 
-        val builder = Preview.Builder()
-        builder.setTargetRotation(ROTATION_180)
-        previewUseCase = builder.build()
+        previewUseCase = Preview.Builder().setTargetRotation(ROTATION_180).build()
         previewUseCase!!.setSurfaceProvider(previewView!!.surfaceProvider)
-        cameraProvider!!.bindToLifecycle(/* lifecycleOwner= */ this,
-            cameraSelector!!,
-            previewUseCase
-        )
+        cameraProvider!!.bindToLifecycle(this, camSelector, previewUseCase)
     }
 
     private fun bindAnalysisUseCase() {
@@ -133,10 +111,7 @@ class MainActivity : AppCompatActivity() {
             .enableTracking()
 
         imageProcessor = FaceDetectorProcessor(this, faceDetectorOptions.build())
-        val builder = ImageAnalysis.Builder()
-        analysisUseCase = builder.build()
-
-        needUpdateGraphicOverlayImageSourceInfo = true // a flag to adjust graphic overlay only one-time
+        analysisUseCase = ImageAnalysis.Builder().build()
 
         //the cameraX method listener method to send stream of data (proxyImage) for whatever analysis we need
         analysisUseCase?.setAnalyzer(
@@ -144,36 +119,15 @@ class MainActivity : AppCompatActivity() {
             // thus we can just runs the analyzer itself on main thread.
             ContextCompat.getMainExecutor(this)
         ) { imageProxy: ImageProxy ->
-            if (needUpdateGraphicOverlayImageSourceInfo) {
-                val isImageFlipped = true //because of CameraSelector.LENS_FACING_FRONT
-                val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-                if (rotationDegrees == 0 || rotationDegrees == 180) {
-                    graphicOverlay!!.setImageSourceInfo(
-                        imageProxy.width,
-                        imageProxy.height,
-                        isImageFlipped
-                    )
-                } else {
-                    graphicOverlay!!.setImageSourceInfo(
-                        imageProxy.height,
-                        imageProxy.width,
-                        isImageFlipped
-                    )
-                }
-                needUpdateGraphicOverlayImageSourceInfo = false
-            }
             try {
-                imageProcessor!!.processImageProxy(imageProxy, graphicOverlay)
+                imageProcessor!!.processImageProxy(imageProxy, this)
             } catch (e: MlKitException) {
                 Log.e(TAG, "Failed to process image. Error: " + e.localizedMessage)
-                Toast.makeText(applicationContext, e.localizedMessage, Toast.LENGTH_SHORT)
-                    .show()
+                Toast.makeText(applicationContext, e.localizedMessage, Toast.LENGTH_SHORT).show()
             }
         }
-        cameraProvider!!.bindToLifecycle(/* lifecycleOwner= */ this,
-            cameraSelector!!,
-            analysisUseCase
-        )
+
+        cameraProvider!!.bindToLifecycle(this, camSelector, analysisUseCase)
     }
 
     private fun isRuntimePermissionsGranted(): Boolean {

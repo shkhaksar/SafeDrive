@@ -19,7 +19,6 @@ package sh.khaksar.safedrive
 import android.app.ActivityManager
 import android.content.Context
 import android.util.Log
-import android.widget.Toast
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageProxy
 import com.google.android.gms.tasks.Task
@@ -52,7 +51,7 @@ abstract class VisionProcessorBase<T>(context: Context) : VisionImageProcessor {
 
     // -----------------Code for processing live preview frame from CameraX API-----------------------
     @ExperimentalGetImage
-    override fun processImageProxy(image: ImageProxy, graphicOverlay: GraphicOverlay) {
+    override fun processImageProxy(image: ImageProxy, context: Context) {
         if (isShutdown) {
             return
         }
@@ -64,18 +63,10 @@ abstract class VisionProcessorBase<T>(context: Context) : VisionImageProcessor {
             // may stall.
             .addOnCompleteListener { image.close() }
             .addOnSuccessListener(executor) { results: T ->
-                graphicOverlay.clear()
-                this@VisionProcessorBase.onSuccess(results, graphicOverlay)
-                graphicOverlay.postInvalidate()
-            }.addOnFailureListener(executor) { e: Exception ->
-                graphicOverlay.clear()
-                graphicOverlay.postInvalidate()
+                this@VisionProcessorBase.onSuccess(results, context)
+            }
+            .addOnFailureListener(executor) { e: Exception ->
                 val error = "Failed to process. Error: " + e.localizedMessage
-                Toast.makeText(
-                    graphicOverlay.context,
-                    """$error Cause: ${e.cause}""".trimIndent(),
-                    Toast.LENGTH_SHORT
-                ).show()
                 Log.d(TAG, error)
                 e.printStackTrace()
                 this@VisionProcessorBase.onFailure(e)
@@ -98,7 +89,7 @@ abstract class VisionProcessorBase<T>(context: Context) : VisionImageProcessor {
         )
     }
 
-    protected abstract fun onSuccess(results: T, graphicOverlay: GraphicOverlay)
+    protected abstract fun onSuccess(results: T, context: Context)
 
     protected abstract fun onFailure(e: Exception)
 }
