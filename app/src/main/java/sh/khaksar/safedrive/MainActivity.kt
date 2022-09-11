@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface.ROTATION_180
+import android.view.View
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -29,16 +30,12 @@ import com.google.android.gms.location.*
 import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import sh.khaksar.safedrive.MainAcitivtyViewModel.FaceDetectionStates
+import sh.khaksar.safedrive.MainAcitivtyViewModel.InCarStates
 import sh.khaksar.safedrive.databinding.ActivityMainBinding
 
 
 class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectListener {
-
-    enum class UIStates(val intervalTolerancePolicy: Int) {
-        SAFE(1),
-        UNSAFE(0),
-        NO_FACE(0)
-    }
 
     companion object {
         private const val TAG = "sh.khaksar.safedrive.MainActivity"
@@ -61,44 +58,88 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
     private var faceProcessor: FaceDetectorProcessor? = null
     private val camSelector = CameraSelector.Builder().requireLensFacing(LENS_FACING_FRONT).build()
 
-    private val viewModel: CameraXViewModel by viewModels()
+    private val viewModel: MainAcitivtyViewModel by viewModels()
 
     private lateinit var safeDriveMediaPlayer: MediaPlayer
     private lateinit var unsafeDriveMediaPlayer: MediaPlayer
     private lateinit var noFaceDetectedMediaPlayer: MediaPlayer
 
 
-    //we will only change uiState when the image has been in the same state for 3 intervals
-    private var stateChangeCounter = 0
-    private var currentUIState: UIStates = UIStates.NO_FACE
-    private var detectedState: UIStates = UIStates.NO_FACE
-
-
     private val transitionBroadcastReceiver: TransitionsReceiver = TransitionsReceiver()
 
-    @SuppressLint("MissingPermission")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!isRuntimePermissionsGranted()) {
+            getRuntimePermissions()
+        }
+
         safeDriveMediaPlayer = MediaPlayer.create(this, R.raw.upward)
         unsafeDriveMediaPlayer = MediaPlayer.create(this, R.raw.downward)
         noFaceDetectedMediaPlayer = MediaPlayer.create(this, R.raw.error)
 
-        if (!isRuntimePermissionsGranted()) {
-            getRuntimePermissions()
-            return
-        }
-
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        viewModel.processCameraProvider?.observe(this)
-        { provider: ProcessCameraProvider? ->
-            cameraProvider = provider
-            bindAllCameraUseCases()
+        viewModel.apply {
+            processCameraProvider?.observe(this@MainActivity) { provider ->
+                cameraProvider = provider
+                bindPreviewUseCase()
+            }
+            uiFaceDetectionState.observe(this@MainActivity) { state -> updateFaceUI(state) }
+            inCarDetectionState.observe(this@MainActivity) { state -> updateCarUI(state) }
         }
 
+        registerActivityRecognition()
+
+        binding.carMessage.setOnClickListener {
+            val intent = Intent()
+            intent.action = TRANSITIONS_RECEIVER_ACTION
+            val result = ActivityRecognitionResult(DetectedActivity(
+                if (viewModel.inCarDetectionState.value != InCarStates.IN_CAR)
+                    DetectedActivity.IN_VEHICLE
+                else
+                    DetectedActivity.STILL,
+                100
+            ),5000,SystemClock.elapsedRealtimeNanos())
+            SafeParcelableSerializer.serializeToIntentExtra(
+                result, intent,
+                "com.google.android.location.internal.EXTRA_ACTIVITY_RESULT"
+            )
+            this.sendBroadcast(intent)
+        }
+    }
+
+
+    override fun onResume() {
+        super.onResume()
+        bindPreviewUseCase()
+        registerReceiver(transitionBroadcastReceiver, IntentFilter(TRANSITIONS_RECEIVER_ACTION))
+    }
+
+    override fun onPause() {
+        super.onPause()
+        faceProcessor?.stop()
+        unregisterReceiver(transitionBroadcastReceiver)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        faceProcessor?.stop()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun registerActivityRecognition() {
         val transitionRequest = ActivityTransitionRequest(
             listOf(
+                ActivityTransition.Builder()
+                    .setActivityType(DetectedActivity.UNKNOWN)
+                    .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                    .build(),
+                ActivityTransition.Builder()
+                    .setActivityType(DetectedActivity.STILL)
+                    .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                    .build(),
                 ActivityTransition.Builder()
                     .setActivityType(DetectedActivity.IN_VEHICLE)
                     .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
@@ -119,61 +160,9 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
         )
 
         ActivityRecognition.getClient(this)
-            .requestActivityTransitionUpdates(transitionRequest, transitionReceiverPendingIntent)
-            .addOnSuccessListener { Log.d("ACTIVITY_TRACK", "SUCCESS") }
-            .addOnFailureListener { Log.d("ACTIVITY_TRACK", "FAILURE") }
-
-        binding.previewView.setOnClickListener {
-            val intent = Intent()
-
-            // Your broadcast receiver action
-
-            intent.action = TRANSITIONS_RECEIVER_ACTION
-            val events: ArrayList<ActivityTransitionEvent> = arrayListOf()
-
-            // You can set desired events with their corresponding state
-
-            val transitionEvent = ActivityTransitionEvent(
-                DetectedActivity.IN_VEHICLE,
-                ActivityTransition.ACTIVITY_TRANSITION_ENTER,
-                SystemClock.elapsedRealtimeNanos()
-            )
-            events.add(transitionEvent)
-            val result = ActivityTransitionResult(events)
-            SafeParcelableSerializer.serializeToIntentExtra(
-                result,
-                intent,
-                "com.google.android.location.internal.EXTRA_ACTIVITY_TRANSITION_RESULT"
-            )
-            this.sendBroadcast(intent)
-        }
-    }
-
-
-    public override fun onResume() {
-        super.onResume()
-        bindAllCameraUseCases()
-        registerReceiver(transitionBroadcastReceiver, IntentFilter(TRANSITIONS_RECEIVER_ACTION))
-    }
-
-    override fun onPause() {
-        super.onPause()
-        faceProcessor?.stop()
-        unregisterReceiver(transitionBroadcastReceiver)
-    }
-
-    public override fun onDestroy() {
-        super.onDestroy()
-        faceProcessor?.stop()
-    }
-
-    private fun bindAllCameraUseCases() {
-        if (cameraProvider != null) {
-            // As required by CameraX API, unbinds all use cases before trying to re-bind any of them.
-            cameraProvider!!.unbindAll()
-            bindPreviewUseCase()
-            bindAnalysisUseCase()
-        }
+            .requestActivityUpdates(500, transitionReceiverPendingIntent)
+            .addOnSuccessListener { Log.d(TAG, "ACTIVITY_TRACK_SUCCESS") }
+            .addOnFailureListener { Log.d(TAG, "ACTIVITY_TRACK_FAILURE") }
     }
 
     private fun bindPreviewUseCase() {
@@ -192,15 +181,7 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
 
     @SuppressLint("UnsafeOptInUsageError")
     private fun bindAnalysisUseCase() {
-        if (cameraProvider == null) {
-            return
-        }
-        if (analysisUseCase != null) {
-            cameraProvider!!.unbind(analysisUseCase)
-        }
-        if (faceProcessor != null) {
-            faceProcessor!!.stop()
-        }
+        unbindAnalysisUseCase() //unbind previous use-case
 
         val faceDetectorOptions = FaceDetectorOptions.Builder()
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
@@ -230,6 +211,18 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
         }
 
         cameraProvider!!.bindToLifecycle(this, camSelector, analysisUseCase)
+    }
+
+    private fun unbindAnalysisUseCase() {
+        if (cameraProvider == null) {
+            return
+        }
+        if (analysisUseCase != null) {
+            cameraProvider!!.unbind(analysisUseCase)
+        }
+        if (faceProcessor != null) {
+            faceProcessor!!.stop()
+        }
     }
 
     private fun isRuntimePermissionsGranted(): Boolean {
@@ -292,119 +285,110 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
             val leop = face?.leftEyeOpenProbability
 
             if (reop == null || leop == null) {
-                detectedState = UIStates.NO_FACE
-                requestUpdateUI(UIStates.NO_FACE)
+                viewModel.updateFaceDetectionState(FaceDetectionStates.NO_FACE)
             }
 
             if (reop != null && leop != null) {
                 if (reop < 0.1f && leop < 0.1f) {
-                    detectedState = UIStates.UNSAFE
-                    requestUpdateUI(UIStates.UNSAFE)
+                    viewModel.updateFaceDetectionState(FaceDetectionStates.UNSAFE)
                 } else if (reop > 0.4f && leop > 0.4f) {
-                    detectedState = UIStates.SAFE
-                    requestUpdateUI(UIStates.SAFE)
+                    viewModel.updateFaceDetectionState(FaceDetectionStates.SAFE)
                 }
             }
         } else {
-            detectedState = UIStates.NO_FACE
-            requestUpdateUI(UIStates.NO_FACE)
+            viewModel.updateFaceDetectionState(FaceDetectionStates.NO_FACE)
         }
     }
 
-    //We only update UI, if the state has been changed and been remained the same for the past 3 intervals
-    private fun requestUpdateUI(state: UIStates) {
-        if (detectedState == currentUIState) {
-            stateChangeCounter = 0
-            return
-        }
 
-        if (stateChangeCounter < currentUIState.intervalTolerancePolicy) {
-            stateChangeCounter++
-            return
-        }
-
-        stateChangeCounter = 0
-        when (state) {
-            UIStates.SAFE -> safeToDrive()
-            UIStates.UNSAFE -> unSafeToDrive()
-            UIStates.NO_FACE -> noFaceDetected()
-        }
-
-    }
-
-    private fun stopSounds() {
+    private fun updateFaceUI(state: FaceDetectionStates) {
         safeDriveMediaPlayer.stop()
         unsafeDriveMediaPlayer.stop()
         noFaceDetectedMediaPlayer.stop()
+
+        when (state) {
+            FaceDetectionStates.SAFE -> {
+                safeDriveMediaPlayer.apply { prepare();start() }
+                binding.faceMessage.apply {
+                    text = getString(R.string.detection_safe)
+                    setBackgroundColor(
+                        ContextCompat.getColor(
+                            applicationContext,
+                            R.color.transparent_holo_green_dark
+                        )
+                    )
+                }
+            }
+            FaceDetectionStates.UNSAFE -> {
+                unsafeDriveMediaPlayer.apply { prepare();start() }
+                binding.faceMessage.apply {
+                    text = getString(R.string.detection_unsafe)
+                    setBackgroundColor(
+                        ContextCompat.getColor(
+                            applicationContext,
+                            R.color.transparent_holo_red_dark
+                        )
+                    )
+                }
+            }
+            FaceDetectionStates.NO_FACE -> {
+                noFaceDetectedMediaPlayer.apply { prepare();start() }
+                binding.faceMessage.apply {
+                    text = getString(R.string.detection_no_face)
+                    setBackgroundColor(
+                        ContextCompat.getColor(
+                            applicationContext,
+                            R.color.transparent_holo_yellow_dark
+                        )
+                    )
+                }
+            }
+        }
     }
 
-    private fun noFaceDetected() {
-
-        //because updating the UI is costly, we don't do it if the state is the same
-        if (currentUIState == UIStates.NO_FACE) return
-        currentUIState = UIStates.NO_FACE
-        stopSounds()
-
-        noFaceDetectedMediaPlayer.prepare()
-        noFaceDetectedMediaPlayer.start()
-        binding.message.setBackgroundColor(
-            ContextCompat.getColor(
-                applicationContext,
-                R.color.transparent_holo_yellow_dark
-            )
-        )
-        binding.message.text = getString(R.string.message_no_face)
+    private fun updateCarUI(state: InCarStates) {
+        when (state) {
+            InCarStates.IN_CAR -> {
+                bindAnalysisUseCase()
+                binding.faceMessage.visibility = View.VISIBLE
+                binding.carMessage.apply {
+                    text = getString(R.string.in_vehicle)
+                    setBackgroundColor(
+                        ContextCompat.getColor(
+                            applicationContext,
+                            R.color.transparent_holo_green_dark
+                        )
+                    )
+                }
+            }
+            InCarStates.OUT_CAR -> {
+                binding.faceMessage.visibility = View.INVISIBLE
+                unbindAnalysisUseCase()
+                binding.carMessage.apply {
+                    text = getString(R.string.out_vehicle)
+                    setBackgroundColor(
+                        ContextCompat.getColor(
+                            applicationContext,
+                            R.color.transparent_holo_red_dark
+                        )
+                    )
+                }
+            }
+        }
     }
-
-    private fun unSafeToDrive() {
-
-        //because updating the UI is costly, we don't do it if the state is the same
-        if (currentUIState == UIStates.UNSAFE) return
-        currentUIState = UIStates.UNSAFE
-        stopSounds()
-
-        binding.message.setBackgroundColor(
-            ContextCompat.getColor(
-                applicationContext,
-                R.color.transparent_holo_red_dark
-            )
-        )
-        binding.message.text = getString(R.string.message_not_safe)
-        unsafeDriveMediaPlayer.prepare()
-        unsafeDriveMediaPlayer.start()
-    }
-
-    private fun safeToDrive() {
-
-        //because updating the UI is costly, we don't do it if the state is the same
-        if (currentUIState == UIStates.SAFE) return
-        currentUIState = UIStates.SAFE
-        stopSounds()
-
-        binding.message.setBackgroundColor(
-            ContextCompat.getColor(
-                applicationContext,
-                R.color.transparent_holo_green_dark
-            )
-        )
-        binding.message.text = getString(R.string.message_safe)
-        safeDriveMediaPlayer.prepare()
-        safeDriveMediaPlayer.start()
-
-    }
-
 
     inner class TransitionsReceiver : BroadcastReceiver() {
 
         override fun onReceive(context: Context, intent: Intent) {
-            if (ActivityTransitionResult.hasResult(intent)) {
-                val result = ActivityTransitionResult.extractResult(intent)
-                if (result != null) {
-                    for (event in result.transitionEvents) {
-                        if (event.activityType == DetectedActivity.IN_VEHICLE && event.transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                            Log.d("Broadcast", "Vehicle Enter")
-                    }
-                }
+            val res = ActivityRecognitionResult.extractResult(intent)
+            Log.d(TAG, res?.mostProbableActivity.toString())
+            if (res?.mostProbableActivity?.type == DetectedActivity.IN_VEHICLE) {
+                viewModel.inCarDetectionState.value = InCarStates.IN_CAR
+                Log.d(TAG, "IN_VEHICLE_ENTER")
+            } else {
+                viewModel.inCarDetectionState.value = InCarStates.OUT_CAR
+                viewModel.uiFaceDetectionState.value = FaceDetectionStates.NO_FACE
+                Log.d(TAG, "IN_VEHICLE_EXIT")
             }
         }
     }

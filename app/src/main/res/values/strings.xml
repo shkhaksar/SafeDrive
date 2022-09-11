@@ -1,6 +1,9 @@
 <resources>
     <string name="app_name">SafeDrive</string>
-    <string name="message_safe">it\'s safe to drive.</string>
-    <string name="message_not_safe">It\'s not safe to drive.</string>
-    <string name="message_no_face">No face detected.</string>
+    <string name="detection_safe">it\'s safe to drive.</string>
+    <string name="detection_unsafe">It\'s not safe to drive.</string>
+    <string name="detection_no_face">No face detected.</string>
+
+    <string name="in_vehicle">✅ You\'re in a car. ✅</string>
+    <string name="out_vehicle">❌ You\'re not in a car ❌</string>
 </resources>
