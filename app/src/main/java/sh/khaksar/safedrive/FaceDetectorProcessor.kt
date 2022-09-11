@@ -14,62 +14,45 @@
  * limitations under the License.
  */
 
-package sh.khaksar.safedrive.facedetector
+package sh.khaksar.safedrive
 
-import android.content.Context
 import android.util.Log
-import android.widget.Toast
-import com.google.android.gms.tasks.Task
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageProxy
+import com.google.android.gms.tasks.TaskExecutors
 import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.face.Face
-import com.google.mlkit.vision.face.FaceDetection
-import com.google.mlkit.vision.face.FaceDetector
-import com.google.mlkit.vision.face.FaceDetectorOptions
-import com.google.mlkit.vision.face.FaceLandmark
-import sh.khaksar.safedrive.VisionProcessorBase
-import java.util.Locale
+import com.google.mlkit.vision.face.*
+import java.util.*
 
-/** Face Detector Demo.  */
-class FaceDetectorProcessor(context: Context, detectorOptions: FaceDetectorOptions?) :
-    VisionProcessorBase<List<Face>>(context) {
+/**
+ * Abstract base class for ML Kit frame processors. Subclasses need to implement {@link
+ * #onSuccess(T, FrameMetadata, GraphicOverlay)} to define what they want to with the detection
+ * results and {@link #detectInImage(VisionImage)} to specify the detector object.
+ *
+ * @param <T> The type of the detected feature.
+ */
+class FaceDetectorProcessor(detectorOptions: FaceDetectorOptions?) {
+
+    interface OnFaceDetectListener {
+        fun onDetect(results: List<Face?>)
+    }
 
     private val detector: FaceDetector
+    private var onFaceDetectListener: OnFaceDetectListener? = null
 
-    init {
-        val options = detectorOptions
-            ?: FaceDetectorOptions.Builder()
-                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-                .enableTracking()
-                .build()
+    private val fpsTimer = Timer()
+    private val executor = ScopedExecutor(TaskExecutors.MAIN_THREAD)
 
-        detector = FaceDetection.getClient(options)
+    // Whether this processor is already shut down
+    private var isShutdown = false
 
-        Log.v(MANUAL_TESTING_LOG, "Face detector options: $options")
-    }
-
-    override fun stop() {
-        super.stop()
-        detector.close()
-    }
-
-    override fun detectInImage(image: InputImage): Task<List<Face>> {
-        return detector.process(image)
-    }
-
-    override fun onSuccess(results: List<Face>,context: Context) {
-        for (face in results) {
-            Toast.makeText(context, face.toString(), Toast.LENGTH_LONG).show()
-            //TODO: You need to update the text here somehow
-            logExtrasForTesting(face)
-        }
-    }
-
-    override fun onFailure(e: Exception) {
-        Log.e(TAG, "Face detection failed $e")
-    }
+    // Frame count that have been processed so far in an one second interval to calculate FPS.
+    private var frameProcessedInInterval = 0
 
     companion object {
+        const val MANUAL_TESTING_LOG = "LogTagForTest"
         private const val TAG = "FaceDetectorProcessor"
+
         private fun logExtrasForTesting(face: Face?) {
             if (face != null) {
                 Log.v(MANUAL_TESTING_LOG, "face bounding box:" + face.boundingBox.flattenToString())
@@ -128,5 +111,68 @@ class FaceDetectorProcessor(context: Context, detectorOptions: FaceDetectorOptio
                 )
             }
         }
+    }
+
+    init {
+
+        // a timer, for processing images every five seconds
+        fpsTimer.scheduleAtFixedRate(
+            object : TimerTask() {
+                override fun run() {
+                    frameProcessedInInterval = 0
+                }
+            }, 0, 1000
+        )
+
+        val options = detectorOptions
+            ?: FaceDetectorOptions.Builder()
+                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
+                .enableTracking()
+                .build()
+
+        detector = FaceDetection.getClient(options)
+
+        Log.v(MANUAL_TESTING_LOG, "Face detector options: $options")
+    }
+
+    // -----------------Code for processing live preview frame from CameraX API-----------------------
+    @ExperimentalGetImage
+    fun processImageProxy(image: ImageProxy) {
+        if (isShutdown) return
+
+        //use detector's async-task to detect off-thread and call detector.close() on finish
+        detector.process(InputImage.fromMediaImage(image.image!!, image.imageInfo.rotationDegrees))
+            // When the image is from CameraX analysis use case, must call image.close() on received
+            // images when finished using them. Otherwise, new images may not be received or the camera
+            // may stall.
+            .addOnCompleteListener { image.close() }
+            .addOnSuccessListener(executor) { results ->
+                if (frameProcessedInInterval > 0) return@addOnSuccessListener
+                frameProcessedInInterval++
+
+                if (results == null) return@addOnSuccessListener
+
+                onFaceDetectListener?.onDetect(results)
+                for (face in results) {
+                    logExtrasForTesting(face)
+                }
+            }
+            .addOnFailureListener(executor) { e ->
+                Log.e(TAG, "Face detection failed $e")
+                Log.d(TAG, "Failed to process. Error: " + e.localizedMessage)
+                e.printStackTrace()
+            }
+
+    }
+
+    fun stop() {
+        executor.shutdown()
+        isShutdown = true
+        fpsTimer.cancel()
+        detector.close()
+    }
+
+    fun setOnFaceDetectListener(l: OnFaceDetectListener) {
+        onFaceDetectListener = l
     }
 }

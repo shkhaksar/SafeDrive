@@ -8,5 +8,7 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <color name="transparent_holo_green_dark">#66669900</color>
+    <color name="transparent_holo_green_dark">#5500FF00</color>
+    <color name="transparent_holo_red_dark">#55FF0000</color>
+    <color name="transparent_holo_yellow_dark">#55FFFF00</color>
 </resources>

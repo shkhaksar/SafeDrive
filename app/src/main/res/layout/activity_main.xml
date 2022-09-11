@@ -19,11 +19,11 @@
         android:layout_width="match_parent"
         android:layout_height="128dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        android:background="@color/transparent_holo_green_dark"
+        android:background="@color/transparent_holo_yellow_dark"
         android:textAlignment="center"
         android:gravity="center"
         android:textColor="@android:color/white"
         android:textSize="32sp"
-        android:text="@string/drive_success"/>
+        android:text="@string/message_no_face"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

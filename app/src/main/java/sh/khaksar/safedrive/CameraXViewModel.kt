@@ -12,6 +12,7 @@ import java.util.concurrent.ExecutionException
 /** View model for interacting with CameraX. */
 class CameraXViewModel(application: Application) : AndroidViewModel(application) {
     private var cameraProviderLiveData: MutableLiveData<ProcessCameraProvider>? = null
+    var isReady = false
 
     // Handle any errors (including cancellation) here.
     val processCameraProvider: MutableLiveData<ProcessCameraProvider>?
@@ -23,6 +24,7 @@ class CameraXViewModel(application: Application) : AndroidViewModel(application)
                     {
                         try {
                             cameraProviderLiveData!!.setValue(cameraProviderFuture.get())
+                            isReady=false
                         } catch (e: ExecutionException) {
                             // Handle any errors (including cancellation) here.
                             Log.e(TAG, "Unhandled exception", e)
