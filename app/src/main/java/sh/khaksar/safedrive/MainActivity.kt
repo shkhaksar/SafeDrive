@@ -26,7 +26,9 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.common.internal.safeparcel.SafeParcelableSerializer
-import com.google.android.gms.location.*
+import com.google.android.gms.location.ActivityRecognition
+import com.google.android.gms.location.ActivityRecognitionResult
+import com.google.android.gms.location.DetectedActivity
 import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetectorOptions
@@ -56,6 +58,7 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
     private var previewUseCase: Preview? = null
     private var analysisUseCase: ImageAnalysis? = null
     private var faceProcessor: FaceDetectorProcessor? = null
+    private var needUpdateGraphicOverlayImageSourceInfo = false
     private val camSelector = CameraSelector.Builder().requireLensFacing(LENS_FACING_FRONT).build()
 
     private val viewModel: MainAcitivtyViewModel by viewModels()
@@ -95,13 +98,15 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
         binding.carMessage.setOnClickListener {
             val intent = Intent()
             intent.action = TRANSITIONS_RECEIVER_ACTION
-            val result = ActivityRecognitionResult(DetectedActivity(
-                if (viewModel.inCarDetectionState.value != InCarStates.IN_CAR)
-                    DetectedActivity.IN_VEHICLE
-                else
-                    DetectedActivity.STILL,
-                100
-            ),5000,SystemClock.elapsedRealtimeNanos())
+            val result = ActivityRecognitionResult(
+                DetectedActivity(
+                    if (viewModel.inCarDetectionState.value != InCarStates.IN_CAR)
+                        DetectedActivity.IN_VEHICLE
+                    else
+                        DetectedActivity.STILL,
+                    100
+                ), 5000, SystemClock.elapsedRealtimeNanos()
+            )
             SafeParcelableSerializer.serializeToIntentExtra(
                 result, intent,
                 "com.google.android.location.internal.EXTRA_ACTIVITY_RESULT"
@@ -130,27 +135,6 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
 
     @SuppressLint("MissingPermission")
     private fun registerActivityRecognition() {
-        val transitionRequest = ActivityTransitionRequest(
-            listOf(
-                ActivityTransition.Builder()
-                    .setActivityType(DetectedActivity.UNKNOWN)
-                    .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                    .build(),
-                ActivityTransition.Builder()
-                    .setActivityType(DetectedActivity.STILL)
-                    .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                    .build(),
-                ActivityTransition.Builder()
-                    .setActivityType(DetectedActivity.IN_VEHICLE)
-                    .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                    .build(),
-                ActivityTransition.Builder()
-                    .setActivityType(DetectedActivity.IN_VEHICLE)
-                    .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
-                    .build()
-            )
-        )
-
         val transitionReceiverPendingIntent = PendingIntent.getBroadcast(
             this, PENDING_INTENT_REQUESTS, Intent(TRANSITIONS_RECEIVER_ACTION),
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S)
@@ -196,14 +180,20 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
 
         analysisUseCase = ImageAnalysis.Builder().build()
 
+        needUpdateGraphicOverlayImageSourceInfo = true
+
         //the cameraX method listener method to send stream of data (proxyImage) for whatever analysis we need
         analysisUseCase?.setAnalyzer(
             // imageProcessor.processImageProxy will use another thread to run the detection underneath,
             // thus we can just runs the analyzer itself on main thread.
             ContextCompat.getMainExecutor(this)
         ) { imageProxy: ImageProxy ->
+            if (needUpdateGraphicOverlayImageSourceInfo) {
+                binding.graphicOverlay.setImageSourceInfo(imageProxy.height, imageProxy.width, true)
+                needUpdateGraphicOverlayImageSourceInfo = false
+            }
             try {
-                faceProcessor!!.processImageProxy(imageProxy)
+                faceProcessor!!.processImageProxy(binding.graphicOverlay,imageProxy)
             } catch (e: MlKitException) {
                 Log.e(TAG, "Failed to process image. Error: " + e.localizedMessage)
                 Toast.makeText(applicationContext, e.localizedMessage, Toast.LENGTH_SHORT).show()
@@ -279,6 +269,7 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
     // update detectedState only if it's going to be different from UI State
     // then request to updateUI
     override fun onDetect(results: List<Face?>) {
+        binding.graphicOverlay.clear()
         if (results.isNotEmpty()) {
             val face = results[0] //Only process the first face
             val reop = face?.rightEyeOpenProbability
@@ -362,6 +353,7 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
                 }
             }
             InCarStates.OUT_CAR -> {
+                binding.graphicOverlay.clear()
                 binding.faceMessage.visibility = View.INVISIBLE
                 unbindAnalysisUseCase()
                 binding.carMessage.apply {

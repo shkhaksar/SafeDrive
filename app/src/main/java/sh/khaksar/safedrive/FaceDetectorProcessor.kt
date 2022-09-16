@@ -22,6 +22,8 @@ import androidx.camera.core.ImageProxy
 import com.google.android.gms.tasks.TaskExecutors
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.*
+import sh.khaksar.safedrive.views.FaceGraphic
+import sh.khaksar.safedrive.views.GraphicOverlay
 import java.util.*
 
 /**
@@ -137,7 +139,7 @@ class FaceDetectorProcessor(detectorOptions: FaceDetectorOptions?) {
 
     // -----------------Code for processing live preview frame from CameraX API-----------------------
     @ExperimentalGetImage
-    fun processImageProxy(image: ImageProxy) {
+    fun processImageProxy(graphicOverlay: GraphicOverlay, image: ImageProxy) {
         if (isShutdown) return
 
         //use detector's async-task to detect off-thread and call detector.close() on finish
@@ -147,6 +149,12 @@ class FaceDetectorProcessor(detectorOptions: FaceDetectorOptions?) {
             // may stall.
             .addOnCompleteListener { image.close() }
             .addOnSuccessListener(executor) { results ->
+                graphicOverlay.clear()
+                if (results.isNotEmpty()){
+                    graphicOverlay.add(FaceGraphic(graphicOverlay, results[0]))
+                    graphicOverlay.postInvalidate()
+                }
+
                 if (frameProcessedInInterval > 0) return@addOnSuccessListener
                 frameProcessedInInterval++
 
