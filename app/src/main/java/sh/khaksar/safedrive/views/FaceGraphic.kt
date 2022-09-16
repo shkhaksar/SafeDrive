@@ -41,23 +41,7 @@ class FaceGraphic constructor(overlay: GraphicOverlay?, private val face: Face) 
     }
 
     companion object {
-        private const val FACE_POSITION_RADIUS = 8.0f
         private const val ID_TEXT_SIZE = 30.0f
-
         private const val BOX_STROKE_WIDTH = 5.0f
-        private const val NUM_COLORS = 10
-        private val COLORS =
-            arrayOf(
-                intArrayOf(Color.BLACK, Color.WHITE),
-                intArrayOf(Color.WHITE, Color.MAGENTA),
-                intArrayOf(Color.BLACK, Color.LTGRAY),
-                intArrayOf(Color.WHITE, Color.RED),
-                intArrayOf(Color.WHITE, Color.BLUE),
-                intArrayOf(Color.WHITE, Color.DKGRAY),
-                intArrayOf(Color.BLACK, Color.CYAN),
-                intArrayOf(Color.BLACK, Color.YELLOW),
-                intArrayOf(Color.WHITE, Color.BLACK),
-                intArrayOf(Color.BLACK, Color.GREEN)
-            )
     }
 }
