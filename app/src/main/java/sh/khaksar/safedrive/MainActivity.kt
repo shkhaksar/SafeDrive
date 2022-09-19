@@ -64,8 +64,11 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
     private val viewModel: MainAcitivtyViewModel by viewModels()
 
     private lateinit var safeDriveMediaPlayer: MediaPlayer
+    private lateinit var safeDriveMediaPlayer1: MediaPlayer
     private lateinit var unsafeDriveMediaPlayer: MediaPlayer
+    private lateinit var unsafeDriveMediaPlayer1: MediaPlayer
     private lateinit var noFaceDetectedMediaPlayer: MediaPlayer
+    private lateinit var noFaceDetectedMediaPlayer1: MediaPlayer
 
 
     private val transitionBroadcastReceiver: TransitionsReceiver = TransitionsReceiver()
@@ -78,8 +81,11 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
         }
 
         safeDriveMediaPlayer = MediaPlayer.create(this, R.raw.upward)
+        safeDriveMediaPlayer1 = MediaPlayer.create(this, R.raw.safe_speech)
         unsafeDriveMediaPlayer = MediaPlayer.create(this, R.raw.downward)
+        unsafeDriveMediaPlayer1 = MediaPlayer.create(this, R.raw.unsafe_speech)
         noFaceDetectedMediaPlayer = MediaPlayer.create(this, R.raw.error)
+        noFaceDetectedMediaPlayer1 = MediaPlayer.create(this, R.raw.noface_speech)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -193,7 +199,7 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
                 needUpdateGraphicOverlayImageSourceInfo = false
             }
             try {
-                faceProcessor!!.processImageProxy(binding.graphicOverlay,imageProxy)
+                faceProcessor!!.processImageProxy(binding.graphicOverlay, imageProxy)
             } catch (e: MlKitException) {
                 Log.e(TAG, "Failed to process image. Error: " + e.localizedMessage)
                 Toast.makeText(applicationContext, e.localizedMessage, Toast.LENGTH_SHORT).show()
@@ -294,12 +300,18 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
 
     private fun updateFaceUI(state: FaceDetectionStates) {
         safeDriveMediaPlayer.stop()
+        safeDriveMediaPlayer1.stop()
         unsafeDriveMediaPlayer.stop()
+        unsafeDriveMediaPlayer1.stop()
         noFaceDetectedMediaPlayer.stop()
+        noFaceDetectedMediaPlayer1.stop()
+
+        if (viewModel.inCarDetectionState.value == InCarStates.OUT_CAR) return
 
         when (state) {
             FaceDetectionStates.SAFE -> {
                 safeDriveMediaPlayer.apply { prepare();start() }
+                safeDriveMediaPlayer1.apply { prepare();start() }
                 binding.faceMessage.apply {
                     text = getString(R.string.detection_safe)
                     setBackgroundColor(
@@ -312,6 +324,7 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
             }
             FaceDetectionStates.UNSAFE -> {
                 unsafeDriveMediaPlayer.apply { prepare();start() }
+                unsafeDriveMediaPlayer1.apply { prepare();start() }
                 binding.faceMessage.apply {
                     text = getString(R.string.detection_unsafe)
                     setBackgroundColor(
@@ -324,6 +337,7 @@ class MainActivity : AppCompatActivity(), FaceDetectorProcessor.OnFaceDetectList
             }
             FaceDetectionStates.NO_FACE -> {
                 noFaceDetectedMediaPlayer.apply { prepare();start() }
+                noFaceDetectedMediaPlayer1.apply { prepare();start() }
                 binding.faceMessage.apply {
                     text = getString(R.string.detection_no_face)
                     setBackgroundColor(
